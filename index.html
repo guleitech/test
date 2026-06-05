@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>图片格式转换器</title>
+    <script src="https://js.stripe.com/v3/"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+        }
+        .upload-area {
+            border: 2px dashed #667eea;
+            border-radius: 10px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-bottom: 20px;
+        }
+        .upload-area:hover {
+            background: #f8f9ff;
+            border-color: #764ba2;
+        }
+        .upload-area.dragover {
+            background: #f0f3ff;
+            border-color: #667eea;
+        }
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+        #fileInput {
+            display: none;
+        }
+        .preview {
+            margin-top: 20px;
+            display: none;
+        }
+        .preview img {
+            max-width: 100%;
+            max-height: 200px;
+            border-radius: 10px;
+        }
+        .file-info {
+            margin-top: 10px;
+            color: #666;
+            font-size: 14px;
+        }
+        .format-select {
+            margin: 20px 0;
+        }
+        .format-select label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+        }
+        .format-select select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        .format-select select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .price-info {
+            text-align: center;
+            margin: 20px 0;
+            padding: 15px;
+            background: #f8f9ff;
+            border-radius: 8px;
+            color: #667eea;
+            font-weight: 600;
+        }
+        #payment-element {
+            margin: 20px 0;
+        }
+        button {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, opacity 0.2s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            opacity: 0.95;
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            display: none;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            display: block;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            display: block;
+        }
+        .status.loading {
+            background: #fff3cd;
+            color: #856404;
+            display: block;
+        }
+        .download-btn {
+            margin-top: 10px;
+            background: #28a745;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🖼️ 图片格式转换器</h1>
+        <p class="subtitle">快速将图片转换为所需格式</p>
+        
+        <div class="upload-area" id="uploadArea">
+            <div class="upload-icon">📁</div>
+            <p>点击或拖拽上传图片</p>
+            <p style="font-size: 12px; color: #999; margin-top: 8px;">支持 JPG, PNG, WEBP, GIF (最大10MB)</p>
+        </div>
+        <input type="file" id="fileInput" accept="image/*">
+        
+        <div class="preview" id="preview">
+            <img id="previewImage" src="" alt="预览">
+            <div class="file-info" id="fileInfo"></div>
+        </div>
+        
+        <div class="format-select">
+            <label>目标格式</label>
+            <select id="targetFormat">
+                <option value="webp">WEBP (推荐)</option>
+                <option value="jpeg">JPEG</option>
+                <option value="png">PNG</option>
+                <option value="gif">GIF</option>
+            </select>
+        </div>
+        
+        <div class="price-info">
+            每次转换仅需 $0.99 💸
+        </div>
+        
+        <div id="payment-element"></div>
+        
+        <button id="submitBtn" disabled>请先上传图片</button>
+        
+        <div class="status" id="status"></div>
+    </div>
+
+    <script>
+        let stripe;
+        let elements;
+        let clientSecret;
+        let selectedFile;
+        let paymentIntentId;
+
+        // 初始化 Stripe（实际部署时需要替换为你的公钥）
+        async function initStripe() {
+            try {
+                const response = await fetch('/api/config');
+                const config = await response.json();
+                stripe = Stripe(config.publicKey);
+                
+                // 创建支付意图
+                const paymentResponse = await fetch('/api/create-payment-intent', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ format: document.getElementById('targetFormat').value })
+                });
+                const { clientSecret: secret } = await paymentResponse.json();
+                clientSecret = secret;
+                
+                const appearance = { theme: 'stripe' };
+                elements = stripe.elements({ appearance, clientSecret });
+                const paymentElement = elements.create('payment');
+                paymentElement.mount('#payment-element');
+            } catch (error) {
+                console.error('Stripe 初始化失败:', error);
+                updateStatus('请先在 .env 文件中配置 Stripe 密钥', 'error');
+            }
+        }
+
+        // 文件上传处理
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const preview = document.getElementById('preview');
+        const previewImage = document.getElementById('previewImage');
+        const fileInfo = document.getElementById('fileInfo');
+        const submitBtn = document.getElementById('submitBtn');
+
+        uploadArea.addEventListener('click', () => fileInput.click());
+        
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+        
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+        });
+        
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files[0]) handleFile(e.target.files[0]);
+        });
+
+        function handleFile(file) {
+            if (!file.type.startsWith('image/')) {
+                updateStatus('请选择图片文件', 'error');
+                return;
+            }
+            if (file.size > 10 * 1024 * 1024) {
+                updateStatus('图片大小不能超过10MB', 'error');
+                return;
+            }
+            
+            selectedFile = file;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                previewImage.src = e.target.result;
+                preview.style.display = 'block';
+                fileInfo.textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+                submitBtn.disabled = false;
+                submitBtn.textContent = '支付并转换';
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // 提交支付和转换
+        submitBtn.addEventListener('click', async () => {
+            if (!selectedFile) return;
+            
+            submitBtn.disabled = true;
+            updateStatus('正在处理支付...', 'loading');
+            
+            try {
+                // 确认支付
+                const { error, paymentIntent } = await stripe.confirmPayment({
+                    elements,
+                    confirmParams: { return_url: window.location.href },
+                    redirect: 'if_required'
+                });
+                
+                if (error) throw error;
+                
+                paymentIntentId = paymentIntent.id;
+                updateStatus('支付成功，正在转换图片...', 'loading');
+                
+                // 执行转换
+                const formData = new FormData();
+                formData.append('image', selectedFile);
+                formData.append('paymentIntentId', paymentIntentId);
+                formData.append('targetFormat', document.getElementById('targetFormat').value);
+                
+                const convertResponse = await fetch('/api/convert', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await convertResponse.json();
+                if (!result.success) throw new Error(result.error);
+                
+                updateStatus('转换成功！', 'success');
+                
+                // 添加下载按钮
+                const downloadBtn = document.createElement('button');
+                downloadBtn.className = 'download-btn';
+                downloadBtn.textContent = '📥 下载转换后的图片';
+                downloadBtn.onclick = () => window.location.href = result.downloadUrl;
+                document.getElementById('status').appendChild(downloadBtn);
+                
+            } catch (error) {
+                updateStatus('错误: ' + error.message, 'error');
+                submitBtn.disabled = false;
+            }
+        });
+
+        function updateStatus(message, type) {
+            const status = document.getElementById('status');
+            status.className = 'status ' + type;
+            status.innerHTML = message;
+        }
+
+        // 初始化
+        initStripe();
+    </script>
+</body>
+</html>
