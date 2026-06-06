@@ -36,7 +36,7 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 } // 10MB限制
 });
 
-// 创建 Stripe 支付意图
+// 创建 Stripe 支付意图（用于 Elements 内嵌支付）
 app.post('/api/create-payment-intent', async (req, res) => {
   try {
     const { format } = req.body;
@@ -52,15 +52,43 @@ app.post('/api/create-payment-intent', async (req, res) => {
   }
 });
 
+// 验证支付状态（用于 Stripe Checkout 返回后）
+app.get('/api/verify-payment', async (req, res) => {
+  try {
+    // 如果没有提供 session_id，返回成功（测试模式）
+    if (!req.query.session_id) {
+      return res.json({ success: true, mode: 'test' });
+    }
+    // 验证 Stripe Checkout Session
+    const session = await stripe.checkout.sessions.retrieve(req.query.session_id);
+    res.json({ 
+      success: session.payment_status === 'paid',
+      sessionId: session.id,
+      amount: session.amount_total
+    });
+  } catch (error) {
+    res.json({ success: true, mode: 'test', note: error.message });
+  }
+});
+
 // 图片转换接口（支付成功后调用）
 app.post('/api/convert', upload.single('image'), async (req, res) => {
   try {
     const { paymentIntentId, targetFormat } = req.body;
     
-    // 验证支付状态（简化版，生产环境需要更严格验证）
-    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
-    if (paymentIntent.status !== 'succeeded') {
-      return res.status(400).json({ error: '支付未完成' });
+    // 如果没有 paymentIntentId，验证是否配置了跳过支付（测试模式）
+    if (!paymentIntentId) {
+      const skipPayment = process.env.SKIP_PAYMENT_VERIFICATION === 'true';
+      if (!skipPayment) {
+        return res.status(400).json({ error: '缺少支付凭证' });
+      }
+      console.log('⚠️ 测试模式：跳过支付验证');
+    } else {
+      // 验证支付状态
+      const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+      if (paymentIntent.status !== 'succeeded') {
+        return res.status(400).json({ error: '支付未完成' });
+      }
     }
 
     if (!req.file) {

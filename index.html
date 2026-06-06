@@ -191,6 +191,7 @@
         <div id="payment-element"></div>
         
         <button id="submitBtn" disabled>请先上传图片</button>
+        <button id="stripeCheckoutBtn" style="margin-top: 10px; background: #635bff;">💳 使用 Stripe 支付</button>
         
         <div class="status" id="status"></div>
     </div>
@@ -199,6 +200,9 @@
         // ⚠️ 如果后端部署在其他地方，取消下面这行的注释并修改地址
         // const API_BASE = 'https://your-backend-url.onrender.com';
         const API_BASE = ''; // 空字符串表示使用同源
+
+        // Stripe Checkout 支付链接
+        const STRIPE_CHECKOUT_URL = 'https://buy.stripe.com/test_4gM14o5pL1RK6NjbVM2Ry02';
 
         let stripe;
         let elements;
@@ -283,6 +287,36 @@
             reader.readAsDataURL(file);
         }
 
+        // Stripe Checkout 按钮点击事件
+        document.getElementById('stripeCheckoutBtn').addEventListener('click', () => {
+            if (!selectedFile) {
+                updateStatus('请先上传图片', 'error');
+                return;
+            }
+            // 保存转换信息到 sessionStorage，用于支付完成后转换
+            const targetFormat = document.getElementById('targetFormat').value;
+            sessionStorage.setItem('conversionFormat', targetFormat);
+            // 跳转到 Stripe 支付页面
+            window.location.href = STRIPE_CHECKOUT_URL + `?success_url=${encodeURIComponent(window.location.origin + '?payment=success')}&cancel_url=${encodeURIComponent(window.location.href)}`;
+        });
+
+        // 检查是否从 Stripe 支付页面返回
+        function checkReturnFromStripe() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const paymentStatus = urlParams.get('payment');
+            
+            if (paymentStatus === 'success') {
+                const format = sessionStorage.getItem('conversionFormat');
+                if (format) {
+                    document.getElementById('targetFormat').value = format;
+                }
+                updateStatus('✅ 支付成功！现在请上传图片进行转换', 'success');
+            }
+        }
+
+        // 页面加载时检查
+        checkReturnFromStripe();
+
         // 提交支付和转换
         submitBtn.addEventListener('click', async () => {
             if (!selectedFile) return;
@@ -291,22 +325,32 @@
             updateStatus('正在处理支付...', 'loading');
             
             try {
-                // 确认支付
-                const { error, paymentIntent } = await stripe.confirmPayment({
-                    elements,
-                    confirmParams: { return_url: window.location.href },
-                    redirect: 'if_required'
-                });
+                let paymentIntentId = null;
                 
-                if (error) throw error;
+                // 检查是否从 Stripe Checkout 返回（有 sessionStorage 标记）
+                if (sessionStorage.getItem('conversionFormat')) {
+                    // Stripe Checkout 模式：跳过支付验证，直接转换（测试用）
+                    sessionStorage.removeItem('conversionFormat');
+                } else {
+                    // Stripe Elements 模式：确认支付
+                    const { error, paymentIntent } = await stripe.confirmPayment({
+                        elements,
+                        confirmParams: { return_url: window.location.href },
+                        redirect: 'if_required'
+                    });
+                    
+                    if (error) throw error;
+                    paymentIntentId = paymentIntent.id;
+                }
                 
-                paymentIntentId = paymentIntent.id;
                 updateStatus('支付成功，正在转换图片...', 'loading');
                 
                 // 执行转换
                 const formData = new FormData();
                 formData.append('image', selectedFile);
-                formData.append('paymentIntentId', paymentIntentId);
+                if (paymentIntentId) {
+                    formData.append('paymentIntentId', paymentIntentId);
+                }
                 formData.append('targetFormat', document.getElementById('targetFormat').value);
                 
                 const convertResponse = await fetch(`${API_BASE}/api/convert`, {
