@@ -194,16 +194,10 @@
     </div>
 
     <script>
-        // ⚠️ 如果后端部署在其他地方，取消下面这行的注释并修改地址
-        // const API_BASE = 'https://your-backend-url.onrender.com';
-        const API_BASE = ''; // 空字符串表示使用同源
-
-        // Stripe Checkout 支付链接
-        const STRIPE_CHECKOUT_URL = 'https://buy.stripe.com/test_4gM14o5pL1RK6NjbVM2Ry02';
+        // API 配置
+        const API_BASE = '';
 
         let selectedFile;
-        let hasPaid = false; // 标记是否已支付
-        let pendingFileData = null; // 保存待转换的文件数据
 
         // 文件上传处理
         const uploadArea = document.getElementById('uploadArea');
@@ -256,63 +250,6 @@
             reader.readAsDataURL(file);
         }
 
-        // IndexedDB 存储管理
-        const DB_NAME = 'ImageConverterDB';
-        const DB_VERSION = 1;
-        const STORE_NAME = 'pendingFiles';
-        let db = null;
-
-        function initDB() {
-            return new Promise((resolve, reject) => {
-                const request = indexedDB.open(DB_NAME, DB_VERSION);
-                request.onerror = () => reject(request.error);
-                request.onsuccess = () => {
-                    db = request.result;
-                    resolve(db);
-                };
-                request.onupgradeneeded = (event) => {
-                    const database = event.target.result;
-                    if (!database.objectStoreNames.contains(STORE_NAME)) {
-                        database.createObjectStore(STORE_NAME, { keyPath: 'id' });
-                    }
-                };
-            });
-        }
-
-        async function saveToDB(fileData) {
-            await initDB();
-            return new Promise((resolve, reject) => {
-                const transaction = db.transaction([STORE_NAME], 'readwrite');
-                const store = transaction.objectStore(STORE_NAME);
-                const data = { id: 'pending', ...fileData };
-                const request = store.put(data);
-                request.onsuccess = () => resolve();
-                request.onerror = () => reject(request.error);
-            });
-        }
-
-        async function getFromDB() {
-            await initDB();
-            return new Promise((resolve, reject) => {
-                const transaction = db.transaction([STORE_NAME], 'readonly');
-                const store = transaction.objectStore(STORE_NAME);
-                const request = store.get('pending');
-                request.onsuccess = () => resolve(request.result);
-                request.onerror = () => reject(request.error);
-            });
-        }
-
-        async function deleteFromDB() {
-            if (!db) return;
-            return new Promise((resolve, reject) => {
-                const transaction = db.transaction([STORE_NAME], 'readwrite');
-                const store = transaction.objectStore(STORE_NAME);
-                const request = store.delete('pending');
-                request.onsuccess = () => resolve();
-                request.onerror = () => reject(request.error);
-            });
-        }
-
         // 支付并转换按钮点击事件
         submitBtn.addEventListener('click', async () => {
             if (!selectedFile) {
@@ -320,30 +257,41 @@
                 return;
             }
             
-            // 将文件转为 Base64
-            const targetFormat = document.getElementById('targetFormat').value;
-            const reader = new FileReader();
-            reader.onload = async (e) => {
-                try {
-                    // 保存到 IndexedDB
-                    await saveToDB({
-                        name: selectedFile.name,
-                        type: selectedFile.type,
+            submitBtn.disabled = true;
+            submitBtn.textContent = '正在跳转支付...';
+            
+            try {
+                // 将文件转为 Base64
+                const targetFormat = document.getElementById('targetFormat').value;
+                const base64Data = await new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onload = (e) => resolve(e.target.result);
+                    reader.readAsDataURL(selectedFile);
+                });
+                
+                // 创建 Checkout Session
+                const response = await fetch(`${API_BASE}/api/create-checkout-session`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
                         format: targetFormat,
-                        data: e.target.result,
-                        timestamp: Date.now()
-                    });
-                    
-                    // 跳转到 Stripe 支付页面
-                    const successUrl = encodeURIComponent(window.location.origin + '?payment=success');
-                    const cancelUrl = encodeURIComponent(window.location.href);
-                    window.location.href = STRIPE_CHECKOUT_URL + `?success_url=${successUrl}&cancel_url=${cancelUrl}`;
-                } catch (err) {
-                    updateStatus('存储失败，请重试', 'error');
-                    console.error(err);
-                }
-            };
-            reader.readAsDataURL(selectedFile);
+                        imageData: base64Data
+                    })
+                });
+                
+                const { url, error } = await response.json();
+                
+                if (error) throw new Error(error);
+                if (!url) throw new Error('获取支付链接失败');
+                
+                // 跳转到 Stripe Checkout
+                window.location.href = url;
+                
+            } catch (err) {
+                updateStatus('错误: ' + err.message, 'error');
+                submitBtn.disabled = false;
+                submitBtn.textContent = '支付并转换';
+            }
         });
 
         // 将 Base64 转换为 Blob
@@ -358,28 +306,28 @@
         }
 
         // 检查是否从 Stripe 支付页面返回
-        async function checkReturnFromStripe() {
+        function checkReturnFromStripe() {
             const urlParams = new URLSearchParams(window.location.search);
-            const paymentStatus = urlParams.get('payment');
+            const paySuccess = urlParams.get('pay_success');
+            const format = urlParams.get('format');
+            const imageData = urlParams.get('image');
             
-            if (paymentStatus === 'success') {
+            if (paySuccess === '1' && imageData) {
                 try {
-                    const fileData = await getFromDB();
-                    if (fileData && fileData.data) {
-                        // 检查是否过期（1小时）
-                        if (Date.now() - fileData.timestamp > 3600000) {
-                            await deleteFromDB();
-                            updateStatus('数据已过期，请重新上传', 'error');
-                            return;
-                        }
-                        updateStatus('✅ 支付成功！正在转换图片...', 'loading');
-                        convertImage(fileData);
-                        return;
-                    }
+                    const fileData = {
+                        format: decodeURIComponent(format),
+                        data: decodeURIComponent(imageData)
+                    };
+                    updateStatus('✅ 支付成功！正在转换图片...', 'loading');
+                    convertImage(fileData);
+                    // 清理 URL 参数
+                    window.history.replaceState({}, '', window.location.pathname);
                 } catch (e) {
-                    console.error('读取数据失败:', e);
+                    updateStatus('处理失败，请重试', 'error');
                 }
-                updateStatus('✅ 支付成功！但未找到图片数据，请重新上传', 'success');
+            } else if (urlParams.get('pay_canceled') === '1') {
+                updateStatus('支付已取消', 'error');
+                window.history.replaceState({}, '', window.location.pathname);
             }
         }
 
@@ -392,8 +340,9 @@
                 submitBtn.textContent = '转换中...';
                 
                 // 将 Base64 转换为 File 对象
-                const blob = base64ToBlob(fileData.data, fileData.type);
-                const file = new File([blob], fileData.name, { type: fileData.type });
+                const mimeType = fileData.data.match(/^data:(.*?);/)[1] || 'image/png';
+                const blob = base64ToBlob(fileData.data, mimeType);
+                const file = new File([blob], 'image.' + (fileData.format || 'webp'), { type: mimeType });
                 
                 updateStatus('正在转换图片...', 'loading');
                 
@@ -408,9 +357,6 @@
                 
                 const result = await convertResponse.json();
                 if (!result.success) throw new Error(result.error);
-                
-                // 清理 sessionStorage
-                sessionStorage.removeItem('pendingFile');
                 
                 updateStatus('转换成功！', 'success');
                 submitBtn.textContent = '转换完成';

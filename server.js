@@ -52,6 +52,40 @@ app.post('/api/create-payment-intent', async (req, res) => {
   }
 });
 
+// 创建 Stripe Checkout Session
+app.post('/api/create-checkout-session', async (req, res) => {
+  try {
+    const { format, imageData } = req.body;
+    
+    // 动态获取域名（生产环境需要配置）
+    const origin = process.env.BASE_URL || req.headers.origin || 'https://test-ayz.pages.dev';
+    
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: [
+        {
+          price_data: {
+            currency: 'usd',
+            product_data: {
+              name: '图片格式转换',
+              description: `转换为 ${format || 'webp'} 格式`
+            },
+            unit_amount: parseInt(process.env.CONVERSION_PRICE) || 99,
+          },
+          quantity: 1,
+        },
+      ],
+      mode: 'payment',
+      success_url: `${origin}/?pay_success=1&format=${encodeURIComponent(format || 'webp')}&image=${encodeURIComponent(imageData || '')}`,
+      cancel_url: `${origin}/?pay_canceled=1`,
+    });
+    
+    res.json({ url: session.url });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // 验证支付状态（用于 Stripe Checkout 返回后）
 app.get('/api/verify-payment', async (req, res) => {
   try {
