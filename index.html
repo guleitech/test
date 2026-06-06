@@ -259,51 +259,70 @@
 
         // 支付并转换按钮点击事件
         let hasPaid = false; // 标记是否已支付
+        let pendingFileData = null; // 保存待转换的文件数据
         
         submitBtn.addEventListener('click', async () => {
-            // 如果已支付，执行转换
-            if (hasPaid) {
-                if (!selectedFile) {
-                    updateStatus('请先上传图片', 'error');
-                    return;
-                }
-                await convertImage();
+            if (!selectedFile) {
+                updateStatus('请先上传图片', 'error');
                 return;
             }
             
-            // 未支付，跳转到 Stripe 支付页面
-            const successUrl = encodeURIComponent(window.location.origin + '?payment=success&hasPaid=true');
-            const cancelUrl = encodeURIComponent(window.location.href);
-            window.location.href = STRIPE_CHECKOUT_URL + `?success_url=${successUrl}&cancel_url=${cancelUrl}`;
+            // 保存文件信息用于支付返回后自动转换
+            const targetFormat = document.getElementById('targetFormat').value;
+            pendingFileData = {
+                name: selectedFile.name,
+                type: selectedFile.type,
+                format: targetFormat
+            };
+            
+            // 将文件转为 Base64 保存（用于支付返回后自动转换）
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                sessionStorage.setItem('pendingFile', JSON.stringify({
+                    name: selectedFile.name,
+                    type: selectedFile.type,
+                    format: targetFormat,
+                    data: e.target.result
+                }));
+                // 跳转到 Stripe 支付页面
+                const successUrl = encodeURIComponent(window.location.origin + '?payment=success');
+                const cancelUrl = encodeURIComponent(window.location.href);
+                window.location.href = STRIPE_CHECKOUT_URL + `?success_url=${successUrl}&cancel_url=${cancelUrl}`;
+            };
+            reader.readAsDataURL(selectedFile);
         });
 
         // 检查是否从 Stripe 支付页面返回
         function checkReturnFromStripe() {
             const urlParams = new URLSearchParams(window.location.search);
             const paymentStatus = urlParams.get('payment');
+            const pendingFileStr = sessionStorage.getItem('pendingFile');
             
-            if (paymentStatus === 'success') {
+            if (paymentStatus === 'success' && pendingFileStr) {
+                const pendingFile = JSON.parse(pendingFileStr);
                 hasPaid = true;
-                submitBtn.textContent = '转换图片';
-                updateStatus('✅ 支付成功！点击下方按钮进行转换', 'success');
+                updateStatus('✅ 支付成功！正在转换图片...', 'loading');
+                
+                // 自动执行转换
+                convertImage(pendingFile);
             }
         }
 
-        async function convertImage() {
-            if (!selectedFile) {
-                updateStatus('请先上传图片', 'error');
-                return;
-            }
-            
-            submitBtn.disabled = true;
-            submitBtn.textContent = '转换中...';
-            
+        async function convertImage(fileData) {
             try {
+                submitBtn.disabled = true;
+                submitBtn.textContent = '转换中...';
+                
+                // 恢复文件对象
+                const response = await fetch(fileData.data);
+                const blob = await response.blob();
+                const file = new File([blob], fileData.name, { type: fileData.type });
+                
                 updateStatus('正在转换图片...', 'loading');
                 
                 const formData = new FormData();
-                formData.append('image', selectedFile);
-                formData.append('targetFormat', document.getElementById('targetFormat').value);
+                formData.append('image', file);
+                formData.append('targetFormat', fileData.format);
                 
                 const convertResponse = await fetch(`${API_BASE}/api/convert`, {
                     method: 'POST',
@@ -312,6 +331,9 @@
                 
                 const result = await convertResponse.json();
                 if (!result.success) throw new Error(result.error);
+                
+                // 清理 sessionStorage
+                sessionStorage.removeItem('pendingFile');
                 
                 updateStatus('转换成功！', 'success');
                 submitBtn.textContent = '转换完成';
@@ -326,7 +348,7 @@
             } catch (error) {
                 updateStatus('错误: ' + error.message, 'error');
                 submitBtn.disabled = false;
-                submitBtn.textContent = '转换图片';
+                submitBtn.textContent = '支付并转换';
             }
         }
 
