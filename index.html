@@ -196,21 +196,25 @@
     </div>
 
     <script>
+        // ⚠️ 如果后端部署在其他地方，取消下面这行的注释并修改地址
+        // const API_BASE = 'https://your-backend-url.onrender.com';
+        const API_BASE = ''; // 空字符串表示使用同源
+
         let stripe;
         let elements;
         let clientSecret;
         let selectedFile;
         let paymentIntentId;
 
-        // 初始化 Stripe（实际部署时需要替换为你的公钥）
+        // 初始化 Stripe
         async function initStripe() {
             try {
-                const response = await fetch('/api/config');
+                const response = await fetch(`${API_BASE}/api/config`);
                 const config = await response.json();
                 stripe = Stripe(config.publicKey);
                 
                 // 创建支付意图
-                const paymentResponse = await fetch('/api/create-payment-intent', {
+                const paymentResponse = await fetch(`${API_BASE}/api/create-payment-intent`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ format: document.getElementById('targetFormat').value })
@@ -305,7 +309,7 @@
                 formData.append('paymentIntentId', paymentIntentId);
                 formData.append('targetFormat', document.getElementById('targetFormat').value);
                 
-                const convertResponse = await fetch('/api/convert', {
+                const convertResponse = await fetch(`${API_BASE}/api/convert`, {
                     method: 'POST',
                     body: formData
                 });
