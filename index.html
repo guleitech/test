@@ -279,13 +279,17 @@
                     })
                 });
                 
-                const { url, error } = await response.json();
+                const text = await response.text();
                 
-                if (error) throw new Error(error);
-                if (!url) throw new Error('获取支付链接失败');
+                if (!response.ok) throw new Error("服务器错误: " + response.status);
+                
+                const data = JSON.parse(text);
+                if (data.error) throw new Error(data.error);
+                if (!data.url) throw new Error("获取支付链接失败");
+                
                 
                 // 跳转到 Stripe Checkout
-                window.location.href = url;
+                window.location.href = data.url;
                 
             } catch (err) {
                 updateStatus('错误: ' + err.message, 'error');
