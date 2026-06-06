@@ -257,9 +257,6 @@
         }
 
         // 支付并转换按钮点击事件
-        let hasPaid = false; // 标记是否已支付
-        let pendingFileData = null; // 保存待转换的文件数据
-        
         submitBtn.addEventListener('click', async () => {
             if (!selectedFile) {
                 updateStatus('请先上传图片', 'error');
