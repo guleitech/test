@@ -177,8 +177,8 @@
     </div>
 
     <script>
-        // ⚠️ Cloudflare Worker 地址（部署后替换）
-        const WORKER_URL = 'https://cold-sun-adda.291278035.workers.dev/api/create-checkout-session';
+        // ⚠️ Stripe Payment Link（直接使用，无需后端）
+        const PAYMENT_LINK = 'https://buy.stripe.com/test_4gM14o5pL1RK6NjbVM2Ry02';
         
         let selectedFile = null;
         let selectedFormat = 'webp';
@@ -187,29 +187,26 @@
         init();
         
         function init() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const paySuccess = urlParams.get('pay_success');
-            const format = urlParams.get('format');
-            const imageData = urlParams.get('image');
+            // 检查是否从 Stripe Payment Link 返回
+            const pendingImage = localStorage.getItem('pendingImage');
+            const pendingFormat = localStorage.getItem('pendingFormat') || 'webp';
             
-            // 从 URL 参数恢复并自动转换
-            if (paySuccess === '1' && imageData) {
+            // 从 localStorage 恢复并自动转换
+            if (pendingImage) {
                 updateStatus('✅ 支付成功！正在转换图片...', 'loading');
                 
                 try {
                     // 延迟执行，确保页面完全加载
                     setTimeout(() => {
-                        const file = dataURLtoFile(decodeURIComponent(imageData), `image.${format || 'webp'}`);
-                        convertImageWithCanvas(file, format || 'webp');
+                        const file = dataURLtoFile(pendingImage, `image.${pendingFormat}`);
+                        convertImageWithCanvas(file, pendingFormat);
+                        // 清理存储
+                        localStorage.removeItem('pendingImage');
+                        localStorage.removeItem('pendingFormat');
                     }, 500);
                 } catch (e) {
                     updateStatus('错误: ' + e.message, 'error');
                 }
-            }
-            
-            // 清理 URL 参数
-            if (paySuccess) {
-                window.history.replaceState({}, '', window.location.pathname);
             }
         }
         
@@ -293,42 +290,19 @@
                 submitBtn.textContent = '准备支付...';
                 updateStatus('正在连接支付...', 'loading');
                 
-                // 将图片转为 Base64
+                // 将图片转为 Base64 并保存到 localStorage
                 const reader = new FileReader();
-                reader.onload = async (e) => {
+                reader.onload = (e) => {
                     const imageData = e.target.result;
+                    
+                    // 保存数据到 localStorage（跨域跳转后仍可访问）
+                    localStorage.setItem('pendingImage', imageData);
+                    localStorage.setItem('pendingFormat', selectedFormat);
                     
                     updateStatus('正在跳转到支付页面...', 'loading');
                     
-                    // 调用 Cloudflare Worker 创建 Stripe Checkout Session
-                    const response = await fetch(WORKER_URL, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            format: selectedFormat
-                        })
-                    });
-                    
-                    const text = await response.text();
-                    
-                    if (!response.ok) {
-                        throw new Error('支付服务暂时不可用');
-                    }
-                    
-                    const data = JSON.parse(text);
-                    
-                    if (data.error) {
-                        throw new Error(data.error);
-                    }
-                    
-                    if (!data.url) {
-                        throw new Error('无法获取支付链接');
-                    }
-                    
-                    // 跳转到 Stripe Checkout
-                    window.location.href = data.url;
+                    // 跳转到 Stripe Payment Link
+                    window.location.href = PAYMENT_LINK;
                 };
                 reader.readAsDataURL(selectedFile);
                 
