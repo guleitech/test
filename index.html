@@ -292,6 +292,17 @@
             reader.readAsDataURL(selectedFile);
         });
 
+        // 将 Base64 转换为 Blob
+        function base64ToBlob(base64, mimeType) {
+            const byteCharacters = atob(base64.split(',')[1]);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            return new Blob([byteArray], { type: mimeType });
+        }
+
         // 检查是否从 Stripe 支付页面返回
         function checkReturnFromStripe() {
             const urlParams = new URLSearchParams(window.location.search);
@@ -313,9 +324,8 @@
                 submitBtn.disabled = true;
                 submitBtn.textContent = '转换中...';
                 
-                // 恢复文件对象
-                const response = await fetch(fileData.data);
-                const blob = await response.blob();
+                // 将 Base64 转换为 File 对象
+                const blob = base64ToBlob(fileData.data, fileData.type);
                 const file = new File([blob], fileData.name, { type: fileData.type });
                 
                 updateStatus('正在转换图片...', 'loading');
