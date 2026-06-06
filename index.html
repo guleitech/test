@@ -303,15 +303,35 @@
         function checkReturnFromStripe() {
             const urlParams = new URLSearchParams(window.location.search);
             const paymentStatus = urlParams.get('payment');
-            const pendingFileStr = sessionStorage.getItem('pendingFile');
             
-            if (paymentStatus === 'success' && pendingFileStr) {
-                const pendingFile = JSON.parse(pendingFileStr);
-                hasPaid = true;
-                updateStatus('✅ 支付成功！正在转换图片...', 'loading');
+            // 延迟检查，确保 sessionStorage 已加载
+            const checkStorage = () => {
+                const pendingFileStr = sessionStorage.getItem('pendingFile');
                 
-                // 自动执行转换
-                convertImage(pendingFile);
+                if (paymentStatus === 'success' && pendingFileStr) {
+                    try {
+                        const pendingFile = JSON.parse(pendingFileStr);
+                        if (pendingFile && pendingFile.data) {
+                            hasPaid = true;
+                            updateStatus('✅ 支付成功！正在转换图片...', 'loading');
+                            convertImage(pendingFile);
+                            return true;
+                        }
+                    } catch (e) {
+                        console.error('解析文件数据失败:', e);
+                    }
+                }
+                return false;
+            };
+            
+            // 首次检查
+            if (!checkStorage()) {
+                // 如果首次检查失败，延迟后重试
+                setTimeout(() => {
+                    if (!checkStorage()) {
+                        setTimeout(checkStorage, 500);
+                    }
+                }, 300);
             }
         }
 
