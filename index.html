@@ -290,23 +290,17 @@
             
             try {
                 submitBtn.disabled = true;
+                submitBtn.textContent = '准备支付...';
+                updateStatus('正在连接支付...', 'loading');
                 
                 // 将图片转为 Base64
                 const reader = new FileReader();
                 reader.onload = async (e) => {
                     const imageData = e.target.result;
                     
-                    // ====== 测试模式：跳过支付，直接转换 ======
-                    // 删除这段代码，正式使用时注释掉
-                    updateStatus('测试模式：跳过支付，直接转换...', 'loading');
-                    const file = dataURLtoFile(imageData, `image.${selectedFormat}`);
-                    await convertImageWithCanvas(file, selectedFormat);
-                    return;
-                    // ====== 测试模式结束 ======
-                    
-                    // 正式模式：调用 Worker 创建支付
                     updateStatus('正在跳转到支付页面...', 'loading');
                     
+                    // 调用 Cloudflare Worker 创建 Stripe Checkout Session
                     const response = await fetch(WORKER_URL, {
                         method: 'POST',
                         headers: {
